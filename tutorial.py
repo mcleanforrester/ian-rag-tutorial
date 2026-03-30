@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 PERMISSION_RANK = {"public": 0, "internal": 1, "confidential": 2}
 
 current_user = {
-    "company_id": "companyA",
+    "department": "engineering",
     "permission_level": "internal",
     "name": "Alice",
 }
@@ -60,7 +60,7 @@ def prompt_with_context(request: ModelRequest) -> str:
         last_query,
         filter={
             "$and": [
-                {"company_id": current_user["company_id"]},
+                {"department": current_user["department"]},
                 {"permission_level": {"$in": allowed_levels}},
             ]
         },
@@ -69,7 +69,7 @@ def prompt_with_context(request: ModelRequest) -> str:
     docs_content = "\n\n".join(doc.page_content for doc in retrieved_docs)
 
     system_message = (
-        "You are an HR representative answering questions from employees about current PTO policies. "
+        "You are a helpful assistant answering questions from employees at a consulting firm. "
         "Use the following pieces of retrieved context to answer the question. "
         "If you don't know the answer or the context does not contain relevant "
         "information, just say that you don't know. Use three sentences maximum "
@@ -103,54 +103,54 @@ model = init_chat_model(model_name, model_provider="anthropic")
 # 2. Embeddings (Llama 3)
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
 
-# 3. Vector Store (single Chroma index, all companies)
+# 3. Vector Store (single Chroma index, all departments)
 base_dir = os.path.dirname(__file__)
 pdf_base = os.path.join(base_dir, "pdfs")
 chroma_path = os.path.join(base_dir, "chroma_db")
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200, add_start_index=True)
 
 vector_store = Chroma(
-    collection_name="company_docs",
+    collection_name="department_docs",
     embedding_function=embeddings,
     persist_directory=chroma_path,
 )
 
 if vector_store._collection.count() == 0:
     print("No existing Chroma data found. Building index from PDFs...")
-    company_dirs = sorted(
+    department_dirs = sorted(
         d for d in os.listdir(pdf_base)
         if os.path.isdir(os.path.join(pdf_base, d))
     )
 
     all_splits = []
-    for company_id in company_dirs:
-        company_pdf_dir = os.path.join(pdf_base, company_id)
-        pdf_files = sorted(glob.glob(os.path.join(company_pdf_dir, "*.pdf")))
+    for department in department_dirs:
+        dept_pdf_dir = os.path.join(pdf_base, department)
+        pdf_files = sorted(glob.glob(os.path.join(dept_pdf_dir, "*.pdf")))
 
         if not pdf_files:
-            print(f"  No PDFs found for {company_id}, skipping.")
+            print(f"  No PDFs found for {department}, skipping.")
             continue
 
         docs = []
         for pdf_path in pdf_files:
             filename = os.path.basename(pdf_path)
             permission_level = parse_permission_level(filename)
-            print(f"  Loading {filename} (company: {company_id}, permission: {permission_level})...")
+            print(f"  Loading {filename} (department: {department}, permission: {permission_level})...")
 
             loader = PyPDFLoader(pdf_path)
             loaded_docs = loader.load()
 
             for doc in loaded_docs:
-                doc.metadata["company_id"] = company_id
+                doc.metadata["department"] = department
                 doc.metadata["permission_level"] = permission_level
                 doc.metadata["owner"] = "hr-team"
 
             docs.extend(loaded_docs)
 
-        print(f"  Loaded {len(docs)} pages from {len(pdf_files)} PDF(s) for {company_id}")
+        print(f"  Loaded {len(docs)} pages from {len(pdf_files)} PDF(s) for {department}")
         all_splits.extend(text_splitter.split_documents(docs))
 
-    print(f"Total splits across all companies: {len(all_splits)}")
+    print(f"Total splits across all departments: {len(all_splits)}")
     vector_store.add_documents(all_splits)
     print("Chroma index built and persisted.")
 else:
@@ -158,8 +158,8 @@ else:
 
 agent = create_agent(model, tools=[], middleware=[prompt_with_context])
 
-print(f"\nReady! Logged in as {current_user['name']} ({current_user['company_id']}, {current_user['permission_level']} access).")
-print("Ask questions about your company's PDFs (type 'quit' to exit).")
+print(f"\nReady! Logged in as {current_user['name']} ({current_user['department']}, {current_user['permission_level']} access).")
+print("Ask questions about your department's documents (type 'quit' to exit).")
 print("Prefix with 'extract:' to extract structured opening data.\n")
 while True:
     query = input("You: ").strip()
