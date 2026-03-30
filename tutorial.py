@@ -1,4 +1,5 @@
 import os
+import re
 import glob
 from guardrails.hub import RegexMatch, ValidLength
 from guardrails import Guard
@@ -8,7 +9,6 @@ from langchain_community.vectorstores import FAISS
 from langchain_ollama import OllamaEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.tools import tool
 from langchain.agents import create_agent
 from langchain.agents.middleware import dynamic_prompt, ModelRequest
 from pydantic import BaseModel, Field
@@ -29,9 +29,9 @@ def parse_permission_level(filename):
     Raises ValueError if no recognized level is found.
     """
     name_lower = filename.lower()
-    for level in PERMISSION_RANK:
-        if level in name_lower:
-            return level
+    match = re.search(r'\b(public|internal|confidential)\b', name_lower)
+    if match:
+        return match.group(1)
     raise ValueError(
         f"Cannot determine permission level from filename '{filename}'. "
         f"Filename must contain one of: {', '.join(PERMISSION_RANK.keys())}"
