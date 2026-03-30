@@ -1,8 +1,11 @@
 import json
 import os
 import re
+from dotenv import load_dotenv
 from anthropic import Anthropic
 from fpdf import FPDF
+
+load_dotenv()
 
 DEPARTMENTS = ["engineering", "accounting", "hr"]
 
@@ -109,6 +112,27 @@ def slugify(text):
     return text.strip("-")
 
 
+def sanitize_text(text):
+    """Replace unicode characters that Helvetica can't render."""
+    replacements = {
+        "\u2014": "--",  # em dash
+        "\u2013": "-",   # en dash
+        "\u2018": "'",   # left single quote
+        "\u2019": "'",   # right single quote
+        "\u201c": '"',   # left double quote
+        "\u201d": '"',   # right double quote
+        "\u2026": "...", # ellipsis
+        "\u2022": "*",   # bullet
+        "\u00a0": " ",   # non-breaking space
+        "\u2192": "->",  # right arrow
+        "\u2190": "<-",  # left arrow
+    }
+    for char, replacement in replacements.items():
+        text = text.replace(char, replacement)
+    # Strip any remaining non-latin-1 characters
+    return text.encode("latin-1", errors="replace").decode("latin-1")
+
+
 def generate_pdfs():
     """Convert the fixture JSON into PDF files."""
     with open(FIXTURE_PATH) as f:
@@ -117,8 +141,8 @@ def generate_pdfs():
     for doc in docs:
         department = doc["department"]
         permission_level = doc["permission_level"]
-        title = doc["title"]
-        content = doc["content"]
+        title = sanitize_text(doc["title"])
+        content = sanitize_text(doc["content"])
 
         dept_dir = os.path.join(PDF_BASE, department)
         os.makedirs(dept_dir, exist_ok=True)
