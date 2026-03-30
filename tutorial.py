@@ -1,6 +1,9 @@
 import os
 import re
 import glob
+import warnings
+
+warnings.filterwarnings("ignore", message="Could not obtain an event loop")
 from guardrails.hub import RegexMatch, ValidLength
 from guardrails import Guard
 from dotenv import load_dotenv
