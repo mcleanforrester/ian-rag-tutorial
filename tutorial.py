@@ -161,7 +161,8 @@ print(f"\nLoaded indexes for: {', '.join(vector_stores.keys())}")
 
 agent = create_agent(model, tools=[], middleware=[prompt_with_context])
 
-print("\nReady! Ask questions about your PDFs (type 'quit' to exit).")
+print(f"\nReady! Logged in as {current_user['name']} ({current_user['company_id']}, {current_user['permission_level']} access).")
+print("Ask questions about your company's PDFs (type 'quit' to exit).")
 print("Prefix with 'extract:' to extract structured opening data.\n")
 while True:
     query = input("You: ").strip()
