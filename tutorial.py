@@ -88,35 +88,62 @@ model = init_chat_model(model_name, model_provider="anthropic")
 # 2. Embeddings (Llama 3)
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
 
-# 3. Vector Store (FAISS, persisted to disk)
-faiss_path = os.path.join(os.path.dirname(__file__), "faiss_index")
+# 3. Vector Stores (per-company FAISS indexes)
+base_dir = os.path.dirname(__file__)
+pdf_base = os.path.join(base_dir, "pdfs")
+index_base = os.path.join(base_dir, "faiss_index")
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200, add_start_index=True)
 
-if os.path.exists(faiss_path):
-    print("Loading existing FAISS index from disk...")
-    vector_store = FAISS.load_local(faiss_path, embeddings, allow_dangerous_deserialization=True)
-    print("Index loaded.")
-else:
-    pdf_dir = os.path.join(os.path.dirname(__file__), "pdfs")
-    pdf_files = sorted(glob.glob(os.path.join(pdf_dir, "company*.pdf")))
+vector_stores = {}
+company_dirs = sorted(
+    d for d in os.listdir(pdf_base)
+    if os.path.isdir(os.path.join(pdf_base, d))
+)
 
-    if not pdf_files:
-        raise SystemExit(f"No PDFs found in {pdf_dir}. Add some and re-run.")
+for company_id in company_dirs:
+    company_index_path = os.path.join(index_base, company_id)
 
-    docs = []
-    for pdf_path in pdf_files:
-        print(f"Loading {os.path.basename(pdf_path)}...")
-        loader = PyPDFLoader(pdf_path)
-        docs.extend(loader.load())
+    if os.path.exists(company_index_path):
+        print(f"Loading existing FAISS index for {company_id}...")
+        vector_stores[company_id] = FAISS.load_local(
+            company_index_path, embeddings, allow_dangerous_deserialization=True
+        )
+        print(f"  Index loaded for {company_id}.")
+    else:
+        company_pdf_dir = os.path.join(pdf_base, company_id)
+        pdf_files = sorted(glob.glob(os.path.join(company_pdf_dir, "*.pdf")))
 
-    print(f"Loaded {len(docs)} pages from {len(pdf_files)} PDF(s)")
+        if not pdf_files:
+            print(f"  No PDFs found for {company_id}, skipping.")
+            continue
 
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200, add_start_index=True)
-    all_splits = text_splitter.split_documents(docs)
-    print(f"Total splits: {len(all_splits)}")
+        docs = []
+        for pdf_path in pdf_files:
+            filename = os.path.basename(pdf_path)
+            permission_level = parse_permission_level(filename)
+            print(f"  Loading {filename} (permission: {permission_level})...")
 
-    vector_store = FAISS.from_documents(all_splits, embeddings)
-    vector_store.save_local(faiss_path)
-    print(f"FAISS index saved to {faiss_path}")
+            loader = PyPDFLoader(pdf_path)
+            loaded_docs = loader.load()
+
+            for doc in loaded_docs:
+                doc.metadata["company_id"] = company_id
+                doc.metadata["permission_level"] = permission_level
+                doc.metadata["owner"] = "hr-team"
+
+            docs.extend(loaded_docs)
+
+        print(f"  Loaded {len(docs)} pages from {len(pdf_files)} PDF(s) for {company_id}")
+
+        all_splits = text_splitter.split_documents(docs)
+        print(f"  Total splits for {company_id}: {len(all_splits)}")
+
+        vector_stores[company_id] = FAISS.from_documents(all_splits, embeddings)
+        os.makedirs(company_index_path, exist_ok=True)
+        vector_stores[company_id].save_local(company_index_path)
+        print(f"  FAISS index saved for {company_id}")
+
+print(f"\nLoaded indexes for: {', '.join(vector_stores.keys())}")
 
 agent = create_agent(model, tools=[], middleware=[prompt_with_context])
 
