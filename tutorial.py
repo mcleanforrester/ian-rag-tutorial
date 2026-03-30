@@ -5,7 +5,7 @@ from guardrails.hub import RegexMatch, ValidLength
 from guardrails import Guard
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
-from langchain_community.vectorstores import FAISS
+from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -50,22 +50,20 @@ def prompt_with_context(request: ModelRequest) -> str:
     """Inject tenant-scoped, permission-filtered context into state messages."""
     last_query = request.state["messages"][-1].text
 
-    company_id = current_user["company_id"]
-    if company_id not in vector_stores:
-        return (
-            "You are an HR representative. The user's company data is not available. "
-            "Apologize and explain that their company's documents have not been loaded."
-        )
-
     user_rank = PERMISSION_RANK[current_user["permission_level"]]
-    retrieved_docs = vector_stores[company_id].similarity_search(last_query)
+    allowed_levels = [level for level, rank in PERMISSION_RANK.items() if rank <= user_rank]
 
-    filtered_docs = [
-        doc for doc in retrieved_docs
-        if PERMISSION_RANK.get(doc.metadata.get("permission_level"), 0) <= user_rank
-    ]
+    retrieved_docs = vector_store.similarity_search(
+        last_query,
+        filter={
+            "$and": [
+                {"company_id": current_user["company_id"]},
+                {"permission_level": {"$in": allowed_levels}},
+            ]
+        },
+    )
 
-    docs_content = "\n\n".join(doc.page_content for doc in filtered_docs)
+    docs_content = "\n\n".join(doc.page_content for doc in retrieved_docs)
 
     system_message = (
         "You are an HR representative answering questions from employees about current PTO policies. "
@@ -102,28 +100,27 @@ model = init_chat_model(model_name, model_provider="anthropic")
 # 2. Embeddings (Llama 3)
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
 
-# 3. Vector Stores (per-company FAISS indexes)
+# 3. Vector Store (single Chroma index, all companies)
 base_dir = os.path.dirname(__file__)
 pdf_base = os.path.join(base_dir, "pdfs")
-index_base = os.path.join(base_dir, "faiss_index")
+chroma_path = os.path.join(base_dir, "chroma_db")
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200, add_start_index=True)
 
-vector_stores = {}
-company_dirs = sorted(
-    d for d in os.listdir(pdf_base)
-    if os.path.isdir(os.path.join(pdf_base, d))
+vector_store = Chroma(
+    collection_name="company_docs",
+    embedding_function=embeddings,
+    persist_directory=chroma_path,
 )
 
-for company_id in company_dirs:
-    company_index_path = os.path.join(index_base, company_id)
+if vector_store._collection.count() == 0:
+    print("No existing Chroma data found. Building index from PDFs...")
+    company_dirs = sorted(
+        d for d in os.listdir(pdf_base)
+        if os.path.isdir(os.path.join(pdf_base, d))
+    )
 
-    if os.path.exists(company_index_path):
-        print(f"Loading existing FAISS index for {company_id}...")
-        vector_stores[company_id] = FAISS.load_local(
-            company_index_path, embeddings, allow_dangerous_deserialization=True
-        )
-        print(f"  Index loaded for {company_id}.")
-    else:
+    all_splits = []
+    for company_id in company_dirs:
         company_pdf_dir = os.path.join(pdf_base, company_id)
         pdf_files = sorted(glob.glob(os.path.join(company_pdf_dir, "*.pdf")))
 
@@ -135,7 +132,7 @@ for company_id in company_dirs:
         for pdf_path in pdf_files:
             filename = os.path.basename(pdf_path)
             permission_level = parse_permission_level(filename)
-            print(f"  Loading {filename} (permission: {permission_level})...")
+            print(f"  Loading {filename} (company: {company_id}, permission: {permission_level})...")
 
             loader = PyPDFLoader(pdf_path)
             loaded_docs = loader.load()
@@ -148,16 +145,13 @@ for company_id in company_dirs:
             docs.extend(loaded_docs)
 
         print(f"  Loaded {len(docs)} pages from {len(pdf_files)} PDF(s) for {company_id}")
+        all_splits.extend(text_splitter.split_documents(docs))
 
-        all_splits = text_splitter.split_documents(docs)
-        print(f"  Total splits for {company_id}: {len(all_splits)}")
-
-        vector_stores[company_id] = FAISS.from_documents(all_splits, embeddings)
-        os.makedirs(company_index_path, exist_ok=True)
-        vector_stores[company_id].save_local(company_index_path)
-        print(f"  FAISS index saved for {company_id}")
-
-print(f"\nLoaded indexes for: {', '.join(vector_stores.keys())}")
+    print(f"Total splits across all companies: {len(all_splits)}")
+    vector_store.add_documents(all_splits)
+    print("Chroma index built and persisted.")
+else:
+    print(f"Loaded existing Chroma index ({vector_store._collection.count()} documents).")
 
 agent = create_agent(model, tools=[], middleware=[prompt_with_context])
 
