@@ -47,11 +47,25 @@ def custom_failed_response(value, fail_result):
 
 @dynamic_prompt
 def prompt_with_context(request: ModelRequest) -> str:
-    """Inject context into state messages."""
+    """Inject tenant-scoped, permission-filtered context into state messages."""
     last_query = request.state["messages"][-1].text
-    retrieved_docs = vector_store.similarity_search(last_query)
 
-    docs_content = "\n\n".join(doc.page_content for doc in retrieved_docs)
+    company_id = current_user["company_id"]
+    if company_id not in vector_stores:
+        return (
+            "You are an HR representative. The user's company data is not available. "
+            "Apologize and explain that their company's documents have not been loaded."
+        )
+
+    user_rank = PERMISSION_RANK[current_user["permission_level"]]
+    retrieved_docs = vector_stores[company_id].similarity_search(last_query)
+
+    filtered_docs = [
+        doc for doc in retrieved_docs
+        if PERMISSION_RANK.get(doc.metadata.get("permission_level"), 0) <= user_rank
+    ]
+
+    docs_content = "\n\n".join(doc.page_content for doc in filtered_docs)
 
     system_message = (
         "You are an HR representative answering questions from employees about current PTO policies. "
