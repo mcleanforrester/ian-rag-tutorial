@@ -63,7 +63,8 @@ def _parse_sse_events(stream):
         if line.startswith("event:"):
             event_type = line[len("event:"):].strip()
         elif line.startswith("data:"):
-            data = line[len("data:"):].strip()
+            raw = line[len("data:"):]
+            data = raw[1:] if raw.startswith(" ") else raw
             yield event_type, data
             event_type = "message"
 
