@@ -12,3 +12,6 @@ wheels/
 # Vector databases
 chroma_db/
 faiss_index/
+
+# Environment variables
+.env*
