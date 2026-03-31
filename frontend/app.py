@@ -1,5 +1,7 @@
-import streamlit as st
+import json
+
 import httpx
+import streamlit as st
 
 API_BASE = "http://localhost:8000"
 
@@ -54,24 +56,49 @@ for msg in st.session_state.messages:
                 for point in ps["key_points"]:
                     st.markdown(f"- {point}")
 
+def _parse_sse_events(stream):
+    """Yield (event_type, data) tuples from an SSE byte stream."""
+    event_type = "message"
+    for line in stream.iter_lines():
+        if line.startswith("event:"):
+            event_type = line[len("event:"):].strip()
+        elif line.startswith("data:"):
+            data = line[len("data:"):].strip()
+            yield event_type, data
+            event_type = "message"
+
+
+def _stream_tokens(user_id, query):
+    """Stream tokens from /chat/stream, yielding text chunks for st.write_stream.
+
+    Stores policy_summary in session state as a side effect.
+    """
+    st.session_state._pending_summary = None
+    with httpx.stream(
+        "POST",
+        f"{API_BASE}/chat/stream",
+        json={"query": query, "user_id": user_id},
+        timeout=60.0,
+    ) as response:
+        response.raise_for_status()
+        for event_type, data in _parse_sse_events(response):
+            if event_type == "token":
+                yield data
+            elif event_type == "summary":
+                st.session_state._pending_summary = json.loads(data)
+            elif event_type == "done":
+                return
+
+
 if prompt := st.chat_input("Ask a question about your department's documents..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            response = httpx.post(
-                f"{API_BASE}/chat",
-                json={"query": prompt, "user_id": selected_user_id},
-                timeout=60.0,
-            )
-            response.raise_for_status()
-            data = response.json()
+        response_text = st.write_stream(_stream_tokens(selected_user_id, prompt))
 
-        st.markdown(data["response"])
-
-        policy_summary = data.get("policy_summary")
+        policy_summary = st.session_state.pop("_pending_summary", None)
         if policy_summary:
             with st.expander("Policy Summary"):
                 st.markdown(f"**{policy_summary['title']}** ({policy_summary['department']})")
@@ -81,6 +108,6 @@ if prompt := st.chat_input("Ask a question about your department's documents..."
 
     st.session_state.messages.append({
         "role": "assistant",
-        "content": data["response"],
+        "content": response_text,
         "policy_summary": policy_summary,
     })
