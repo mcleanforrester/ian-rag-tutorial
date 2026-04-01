@@ -1,9 +1,10 @@
+import bootstrap  # noqa: F401 — must run before any LangChain imports
+
 import os
 import warnings
 
 warnings.filterwarnings("ignore", message="Could not obtain an event loop")
 
-from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 from langchain_ollama import OllamaEmbeddings
 from langchain.agents import create_agent
@@ -16,8 +17,6 @@ from retrieval.store import init_vector_store, index_documents
 from retrieval.repository import DocumentRepository
 from conversation.middleware import create_prompt_middleware
 from conversation.repl import run
-
-load_dotenv()
 
 # 1. Simulated user
 user = User(name="Alice", department="engineering", permission_level=INTERNAL)
@@ -53,5 +52,5 @@ repository = DocumentRepository(vector_store)
 prompt_middleware = create_prompt_middleware(repository, user)
 agent = create_agent(model, tools=[], middleware=[prompt_middleware])
 
-# 8. Run
+# 9. Run
 run(agent, user)
