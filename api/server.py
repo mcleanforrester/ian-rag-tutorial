@@ -1,3 +1,5 @@
+import bootstrap  # noqa: F401 — must run before any LangChain imports
+
 import json
 import os
 import warnings
@@ -6,7 +8,6 @@ warnings.filterwarnings("ignore", message="Could not obtain an event loop")
 
 from contextlib import asynccontextmanager
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from langchain.chat_models import init_chat_model
@@ -28,8 +29,6 @@ model = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global repository, model
-
-    load_dotenv()
 
     model = init_chat_model(config.MODEL_NAME, model_provider=config.MODEL_PROVIDER)
 
