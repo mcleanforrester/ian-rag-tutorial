@@ -4,28 +4,47 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Single-file RAG (Retrieval-Augmented Generation) tutorial using LangChain. The script (`tutorial.py`) loads a web page, chunks it, stores embeddings in an in-memory vector store, and uses a LangChain agent to answer queries by retrieving relevant context.
+RAG (Retrieval-Augmented Generation) application using LangChain. Loads PDFs from `./pdfs/`, chunks and indexes them in ChromaDB, and answers employee queries with department-scoped document retrieval. Has both a CLI REPL (`app.py`) and a FastAPI server (`api/server.py`) with a frontend.
 
 ## Stack
 
-- **LLM**: Anthropic Claude (via `langchain.chat_models.init_chat_model`)
-- **Embeddings**: Ollama with Llama 3 (requires local Ollama server running with `llama3` model pulled)
-- **Vector Store**: LangChain `InMemoryVectorStore`
-- **Document Loading**: `PyPDFLoader` — auto-loads all PDFs from `./pdfs/`
-- **Agent**: LangChain `create_agent` with a custom retrieval tool
+- **LLM**: Anthropic Claude (`claude-sonnet-4-6` via `langchain.chat_models.init_chat_model`)
+- **Embeddings**: Ollama with `nomic-embed-text` (requires local Ollama server)
+- **Vector Store**: ChromaDB (persisted to `./chroma_db/`)
+- **Document Loading**: `PyPDFLoader` — loads all PDFs from `./pdfs/`, organized by department
+- **API**: FastAPI with SSE streaming (`api/server.py`)
+- **Frontend**: `frontend/app.py`
+- **Guards**: Guardrails AI for input validation and structured extraction (`conversation/guards.py`)
+- **Observability**: LangSmith tracing + Arize Phoenix (OTEL) — configured via `bootstrap.py`
+
+## Project Structure
+
+- `bootstrap.py` — shared startup: loads `.env`, registers Phoenix OTEL tracing. Imported first by both entry points.
+- `config.py` — model names, chunk sizes, paths
+- `app.py` — CLI REPL entry point
+- `api/server.py` — FastAPI server entry point (`/chat`, `/chat/stream`, `/users`)
+- `identity/` — user models and permission levels
+- `ingestion/` — PDF loading and text splitting
+- `retrieval/` — ChromaDB vector store and document repository
+- `conversation/` — prompt middleware, input guards, REPL
 
 ## Running
 
 ```bash
-# Requires Ollama running locally with llama3 model
-ollama pull llama3
-python tutorial.py
+# Requires Ollama running locally
+ollama pull nomic-embed-text
+
+# CLI mode
+uv run python app.py
+
+# API server
+uv run uvicorn api.server:app --host 0.0.0.0 --port 8000
 ```
 
 ## Dependencies
 
-Uses `langchain`, `langchain-community`, `langchain-ollama`, `langchain-text-splitters`, `pypdf`. No requirements file exists yet — install manually.
+Managed via `pyproject.toml` + `uv`. Install with `uv sync`.
 
-## Security Note
+## Environment
 
-The API key on line 12 of `tutorial.py` is hardcoded. It should be moved to an environment variable or `.env` file.
+API keys and tracing config are in `.env` (loaded by `bootstrap.py` with `override=True`). See `.env` for required variables: `ANTHROPIC_API_KEY`, `LANGSMITH_*`, `PHOENIX_*`, `GUARDRAILS_API_KEY`.
