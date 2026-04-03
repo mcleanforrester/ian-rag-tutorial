@@ -155,6 +155,8 @@ async def chat_stream(request: ChatRequest):
         f"\n\n{docs_content}"
     )
 
+    span_id = get_current_span_id()
+
     async def event_generator():
         accumulated = []
         for chunk in model.stream([
@@ -167,6 +169,9 @@ async def chat_stream(request: ChatRequest):
                 yield {"event": "token", "data": text}
 
         full_response = "".join(accumulated)
+        task = asyncio.create_task(evaluate_and_log(span_id, request.query, full_response, docs_content))
+        task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+
         success, extracted = extract_structured(full_response)
         if success:
             yield {
