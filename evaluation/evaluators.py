@@ -19,27 +19,41 @@ relevance_eval = RelevanceEvaluator(judge_model)
 
 phoenix_client = Client()
 
-import sys as _sys
-
 _EVALUATIONS = [
     (
         "hallucination",
-        "hallucination_eval",
+        hallucination_eval,
         lambda q, r, c: {"input": q, "reference": c, "output": r},
     ),
     (
         "qa_correctness",
-        "qa_eval",
+        qa_eval,
         lambda q, r, c: {"input": q, "reference": c, "output": r},
     ),
     (
         "retrieval_relevance",
-        "relevance_eval",
+        relevance_eval,
         lambda q, r, c: {"input": q, "reference": c},
     ),
 ]
 
-_THIS_MODULE = _sys.modules[__name__]
+
+async def _run_single_eval(name, evaluator, record, span_id):
+    loop = asyncio.get_running_loop()
+    try:
+        label, score, explanation = await loop.run_in_executor(
+            None, evaluator.evaluate, record
+        )
+        phoenix_client.spans.add_span_annotation(
+            span_id=span_id,
+            annotation_name=name,
+            annotator_kind="LLM",
+            label=label,
+            score=score,
+            explanation=explanation,
+        )
+    except Exception:
+        logger.exception("Evaluation '%s' failed for span %s", name, span_id)
 
 
 async def evaluate_and_log(
@@ -48,22 +62,8 @@ async def evaluate_and_log(
     response: str,
     context: str,
 ) -> None:
-    loop = asyncio.get_running_loop()
-
-    for name, evaluator_attr, build_record in _EVALUATIONS:
-        try:
-            evaluator = getattr(_THIS_MODULE, evaluator_attr)
-            record = build_record(query, response, context)
-            label, score, explanation = await loop.run_in_executor(
-                None, evaluator.evaluate, record
-            )
-            phoenix_client.spans.add_span_annotation(
-                span_id=span_id,
-                annotation_name=name,
-                annotator_kind="LLM",
-                label=label,
-                score=score,
-                explanation=explanation,
-            )
-        except Exception:
-            logger.exception("Evaluation '%s' failed for span %s", name, span_id)
+    tasks = []
+    for name, evaluator, build_record in _EVALUATIONS:
+        record = build_record(query, response, context)
+        tasks.append(_run_single_eval(name, evaluator, record, span_id))
+    await asyncio.gather(*tasks)
