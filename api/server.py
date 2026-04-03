@@ -1,5 +1,6 @@
 import bootstrap  # noqa: F401 — must run before any LangChain imports
 
+import asyncio
 import json
 import os
 import warnings
@@ -21,6 +22,7 @@ from ingestion.splitter import split_documents
 from retrieval.store import init_vector_store, index_documents
 from retrieval.repository import DocumentRepository
 from conversation.guards import extract_structured
+from evaluation.evaluators import evaluate_and_log, get_current_span_id
 
 repository = None
 model = None
@@ -92,7 +94,7 @@ def get_users():
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest):
+async def chat(request: ChatRequest):
     user = USERS.get(request.user_id)
     if not user:
         raise HTTPException(status_code=404, detail=f"User '{request.user_id}' not found")
@@ -116,6 +118,9 @@ def chat(request: ChatRequest):
     ])
 
     response_text = result.content
+
+    span_id = get_current_span_id()
+    asyncio.create_task(evaluate_and_log(span_id, request.query, response_text, docs_content))
 
     success, extracted = extract_structured(response_text)
     policy_summary = None

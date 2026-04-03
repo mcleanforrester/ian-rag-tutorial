@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from opentelemetry import trace
 from phoenix.evals import (
     AnthropicModel,
     HallucinationEvaluator,
@@ -36,6 +37,11 @@ _EVALUATIONS = [
         lambda q, r, c: {"input": q, "reference": c},
     ),
 ]
+
+
+def get_current_span_id() -> str:
+    span = trace.get_current_span()
+    return trace.format_span_id(span.get_span_context().span_id)
 
 
 async def _run_single_eval(name, evaluator, record, span_id):

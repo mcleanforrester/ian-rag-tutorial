@@ -102,3 +102,17 @@ def test_evaluate_and_log_handles_evaluator_failure():
         # Only 2 annotations logged (hallucination failed)
         calls = mock_client.spans.add_span_annotation.call_args_list
         assert len(calls) == 2
+
+
+def test_get_current_span_id_returns_hex_string():
+    """get_current_span_id should return the hex-formatted OTel span ID."""
+    from unittest.mock import MagicMock
+    from evaluation.evaluators import get_current_span_id
+
+    mock_span = MagicMock()
+    mock_span.get_span_context.return_value.span_id = 0xABCDEF1234567890
+
+    with patch("evaluation.evaluators.trace.get_current_span", return_value=mock_span):
+        result = get_current_span_id()
+
+    assert result == "abcdef1234567890"
