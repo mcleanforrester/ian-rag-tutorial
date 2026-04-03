@@ -12,7 +12,7 @@ from phoenix.client import Client
 
 logger = logging.getLogger(__name__)
 
-judge_model = AnthropicModel(model="claude-sonnet-4-6-20250514", temperature=0.0)
+judge_model = AnthropicModel(model="claude-sonnet-4-20250514", temperature=0.0)
 
 hallucination_eval = HallucinationEvaluator(judge_model)
 qa_eval = QAEvaluator(judge_model)
