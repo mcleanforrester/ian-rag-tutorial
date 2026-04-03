@@ -120,7 +120,8 @@ async def chat(request: ChatRequest):
     response_text = result.content
 
     span_id = get_current_span_id()
-    asyncio.create_task(evaluate_and_log(span_id, request.query, response_text, docs_content))
+    task = asyncio.create_task(evaluate_and_log(span_id, request.query, response_text, docs_content))
+    task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
     success, extracted = extract_structured(response_text)
     policy_summary = None
