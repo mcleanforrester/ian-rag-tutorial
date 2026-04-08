@@ -18,3 +18,14 @@ dependencies = [
     "openinference-instrumentation-anthropic>=1.0.0",
     "pypdf>=6.9.2",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "reportlab>=4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = ["adversarial: adversarial document robustness tests"]
