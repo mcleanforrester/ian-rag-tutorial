@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "arize-phoenix-otel>=0.15.0",
     "dotenv>=0.9.9",
     "faiss-cpu>=1.13.2",
     "guardrails-ai>=0.9.3",
@@ -13,5 +14,7 @@ dependencies = [
     "langchain-chroma>=1.1.0",
     "langchain-community>=0.4.1",
     "langchain-ollama>=1.0.1",
+    "langsmith>=0.7.22",
+    "openinference-instrumentation-anthropic>=1.0.0",
     "pypdf>=6.9.2",
 ]
