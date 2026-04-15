@@ -2,41 +2,46 @@ import asyncio
 import logging
 
 from opentelemetry import trace
-from phoenix.evals import (
-    AnthropicModel,
-    HallucinationEvaluator,
-    QAEvaluator,
-    RelevanceEvaluator,
-)
-from phoenix.client import Client
 
 logger = logging.getLogger(__name__)
 
-judge_model = AnthropicModel(model="claude-sonnet-4-20250514", temperature=0.0)
+try:
+    from phoenix.evals import (
+        AnthropicModel,
+        HallucinationEvaluator,
+        QAEvaluator,
+        RelevanceEvaluator,
+    )
+    from phoenix.client import Client
 
-hallucination_eval = HallucinationEvaluator(judge_model)
-qa_eval = QAEvaluator(judge_model)
-relevance_eval = RelevanceEvaluator(judge_model)
+    judge_model = AnthropicModel(model="claude-sonnet-4-20250514", temperature=0.0)
+    hallucination_eval = HallucinationEvaluator(judge_model)
+    qa_eval = QAEvaluator(judge_model)
+    relevance_eval = RelevanceEvaluator(judge_model)
+    phoenix_client = Client()
 
-phoenix_client = Client()
-
-_EVALUATIONS = [
-    (
-        "hallucination",
-        hallucination_eval,
-        lambda q, r, c: {"input": q, "reference": c, "output": r},
-    ),
-    (
-        "qa_correctness",
-        qa_eval,
-        lambda q, r, c: {"input": q, "reference": c, "output": r},
-    ),
-    (
-        "retrieval_relevance",
-        relevance_eval,
-        lambda q, r, c: {"input": q, "reference": c},
-    ),
-]
+    _EVALUATIONS = [
+        (
+            "hallucination",
+            hallucination_eval,
+            lambda q, r, c: {"input": q, "reference": c, "output": r},
+        ),
+        (
+            "qa_correctness",
+            qa_eval,
+            lambda q, r, c: {"input": q, "reference": c, "output": r},
+        ),
+        (
+            "retrieval_relevance",
+            relevance_eval,
+            lambda q, r, c: {"input": q, "reference": c},
+        ),
+    ]
+    _EVALS_AVAILABLE = True
+except ImportError:
+    logger.warning("phoenix.evals v2 API not available — evaluations disabled")
+    _EVALUATIONS = []
+    _EVALS_AVAILABLE = False
 
 
 def get_current_span_id() -> str:

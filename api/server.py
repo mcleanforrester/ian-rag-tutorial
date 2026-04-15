@@ -1,5 +1,6 @@
 import bootstrap  # noqa: F401 — must run before any LangChain imports
 
+import anthropic
 import asyncio
 import json
 import os
@@ -22,6 +23,8 @@ from ingestion.splitter import split_documents
 from retrieval.store import init_vector_store, index_documents
 from retrieval.repository import DocumentRepository
 from conversation.guards import extract_structured
+from tools.definitions import TOOL_SCHEMAS
+from tools.executor import execute_tool
 from opentelemetry import trace
 from evaluation.evaluators import evaluate_and_log, get_current_span_id
 
@@ -193,3 +196,100 @@ async def chat_stream(request: ChatRequest):
         yield {"event": "done", "data": ""}
 
     return EventSourceResponse(event_generator())
+
+
+# ── Tool-calling endpoint ──────────────────────────────────────────────────────
+#
+# This endpoint implements the tool call cycle manually using the raw Anthropic
+# SDK — no LangChain. Every step of the cycle is visible in code below.
+#
+# THE CYCLE:
+#
+#   Turn 1 — We send the user's message + tool schemas to Claude.
+#             Claude reads the schemas and decides whether to call a tool.
+#
+#   Tool use — If Claude's stop_reason is "tool_use", it has NOT replied yet.
+#              It has produced one or more tool_use blocks describing what it
+#              wants to call and with what arguments. We extract those, run the
+#              actual Python functions, and collect the results.
+#
+#   Turn 2 — We send the full conversation so far (original messages + Claude's
+#             tool_use response + our tool_result messages) back to Claude.
+#             Claude now has the data it needed and writes its final reply.
+#
+#   We loop because Claude can request multiple tools across multiple turns
+#   before it's ready to give a final answer.
+
+_anthropic = anthropic.Anthropic()
+
+
+class ToolChatResponse(BaseModel):
+    response: str
+    tool_calls_made: list[str]  # names of tools Claude called, in order
+
+
+@app.post("/chat/tools", response_model=ToolChatResponse)
+async def chat_with_tools(request: ChatRequest):
+    user = USERS.get(request.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User '{request.user_id}' not found")
+
+    # ── Turn 1: initial request ────────────────────────────────────────────────
+    # messages is a list we'll keep appending to across turns.
+    # Each turn we send the full history — Claude has no memory between calls.
+    messages = [{"role": "user", "content": request.query}]
+
+    tool_calls_made = []
+
+    while True:
+        response = _anthropic.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            tools=TOOL_SCHEMAS,   # <-- this is what tells Claude tools exist
+            messages=messages,
+        )
+
+        # ── Did Claude want to call a tool? ───────────────────────────────────
+        # stop_reason "tool_use" means Claude stopped mid-thought to request
+        # a tool. It has NOT written a reply to the user yet.
+        # stop_reason "end_turn" means it's done — the last content block is
+        # the text we return to the user.
+        if response.stop_reason == "end_turn":
+            # Extract the text reply and exit the loop.
+            final_text = next(
+                block.text for block in response.content if block.type == "text"
+            )
+            return ToolChatResponse(response=final_text, tool_calls_made=tool_calls_made)
+
+        # ── Tool use: Claude wants us to call one or more functions ───────────
+        # We append Claude's full response (which contains the tool_use blocks)
+        # to the message history as an "assistant" turn.
+        messages.append({"role": "assistant", "content": response.content})
+
+        # Now build the tool_result content — one result per tool_use block.
+        # Each result must reference the tool_use_id so Claude knows which
+        # call it's the answer to.
+        tool_results = []
+        for block in response.content:
+            if block.type != "tool_use":
+                continue
+
+            tool_calls_made.append(block.name)
+
+            # This is where your application actually runs the function.
+            # Claude asked for it; we execute it; we get a result string.
+            result = execute_tool(block.name, block.input)
+
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": block.id,   # must match the tool_use block's id
+                "content": result,
+            })
+
+        # Append the tool results as a "user" turn.
+        # This is the key step: we're injecting the function output back into
+        # the conversation so Claude can read it on the next turn.
+        messages.append({"role": "user", "content": tool_results})
+
+        # Loop back — Claude will now read the results and either call another
+        # tool or write its final reply.
